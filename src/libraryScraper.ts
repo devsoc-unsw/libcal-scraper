@@ -12,9 +12,7 @@ const LIBRARIES = [
 ];
 
 const scrapeLibraryBookings = async (library: typeof LIBRARIES[number]) => {
-
     const response = await downloadBookingsPage(library.libcalCode);
-
     const bookingData = parseBookingData(response.data['slots']);
 
     const allRoomData: Room[] = [];
@@ -31,16 +29,28 @@ const scrapeLibraryBookings = async (library: typeof LIBRARIES[number]) => {
         if (!roomData) continue; // skipping non-rooms
         allRoomData.push(roomData);
 
-        for (const booking of bookingData[roomID]) {
-            const roomBooking: RoomBooking = {
+        let i = 0;
+        while (i < bookingData[roomID].length) {
+            const currBooking: RoomBooking = {
                 bookingType: 'LIB',
                 name: "Library Booking",
                 roomId: roomData.id,
-                start: booking.start,
-                end: booking.end,
+                start: bookingData[roomID][i].start,
+                end: bookingData[roomID][i].end,
             }
-            allRoomBookings.push(roomBooking);
+            i++;
+
+            // Combine all subsequent bookings that start when this ends
+            while (i < bookingData[roomID].length &&
+                   bookingData[roomID][i].start.getTime() == currBooking.end.getTime()) {
+                currBooking.end = bookingData[roomID][i].end;
+                i++;
+            }
+
+            allRoomBookings.push(currBooking);
         }
+
+        break;
     }
 
     return { rooms: allRoomData, bookings: allRoomBookings };
@@ -90,7 +100,7 @@ interface ResponseData {
     end: string,
     itemId: number,
     checksum: string,
-    className: string | null
+    className?: string
 }
 
 const parseBookingData = (bookingData: ResponseData[]) => {
