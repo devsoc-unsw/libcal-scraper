@@ -2,17 +2,18 @@ import { load } from 'cheerio';
 import { RoomBooking, Room } from "./types";
 import toSydneyTime from "./toSydneyTime";
 import axios from "axios";
+import * as fs from 'fs';
 
 const ROOM_URL = "https://unswlibrary-bookings.libcal.com/space/";
 const BOOKINGS_URL = "https://unswlibrary-bookings.libcal.com/spaces/availability/grid";
-const MAIN_LIBRARY_CODE = '6581';
-const MAIN_LIBRARY_ID = 'K-F21';
-const LAW_LIBRARY_CODE = '6584';
-const LAW_LIBRARY_ID = 'K-E8';
+const LIBRARIES = [
+    { name: 'Main Library', libcalCode: '6581', buildingId: 'K-F21' },
+    { name: 'Law Library', libcalCode: '6584', buildingId: 'K-E8' },
+];
 
-const scrapeLibraryBookings = async(library_code: string, library_id: string) => {
+const scrapeLibraryBookings = async (library: typeof LIBRARIES[number]) => {
 
-    const response = await downloadBookingsPage(library_code);
+    const response = await downloadBookingsPage(library.libcalCode);
 
     const bookingData = parseBookingData(response.data['slots']);
 
@@ -20,14 +21,21 @@ const scrapeLibraryBookings = async(library_code: string, library_id: string) =>
     const allRoomBookings: RoomBooking[] = [];
 
     for (const roomID in bookingData) {
-        const roomData = await getRoomData(roomID, library_id);
+        let roomData: Room | null = null;
+        try {
+            roomData = await getRoomData(roomID, library.buildingId);
+        } catch (e) {
+            console.warn(`Failed to scrape room ${roomID} in ${library.buildingId}`);
+        }
+
+        if (!roomData) continue; // skipping non-rooms
         allRoomData.push(roomData);
 
         for (const booking of bookingData[roomID]) {
             const roomBooking: RoomBooking = {
-                bookingType: 'LIBRARY',
-                name: roomData.name,
-                roomId: roomID,
+                bookingType: 'LIB',
+                name: "Library Booking",
+                roomId: roomData.id,
                 start: booking.start,
                 end: booking.end,
             }
@@ -35,9 +43,7 @@ const scrapeLibraryBookings = async(library_code: string, library_id: string) =>
         }
     }
 
-    console.log(allRoomData);
-    // console.log(JSON.stringify(allRoomBookings, null, 4));
-
+    return { rooms: allRoomData, bookings: allRoomBookings };
 }
 
 // Formats a date into YYYY-MM-DD format
@@ -46,9 +52,7 @@ const formatDate = (date: Date): string => {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
 
-    const formattedDate = `${year}-${month}-${day}`;
-
-    return formattedDate;
+    return `${year}-${month}-${day}`;
 }
 
 const downloadBookingsPage = async(locationId: string) => {
@@ -75,12 +79,10 @@ const downloadBookingsPage = async(locationId: string) => {
 
     const headers = {
         'Content-Type': 'application/x-www-form-urlencoded', // because the request data is URL encoded
-        'Referer': 'https://unswlibrary-bookings.libcal.com/r/new/availability?lid=6581&zone=0&gid=0&capacity=-1'
+        'Referer': 'https://unswlibrary-bookings.libcal.com/'
     };
 
-    const response = await axios.post(BOOKINGS_URL, new URLSearchParams(postData), {headers: headers});
-
-    return response;
+    return await axios.post(BOOKINGS_URL, new URLSearchParams(postData), { headers });
 }
 
 interface ResponseData {
@@ -93,7 +95,7 @@ interface ResponseData {
 
 const parseBookingData = (bookingData: ResponseData[]) => {
 
-    let bookings: { [key: number]: any[] } = {};
+    const bookings: { [roomNumber: number]: { start: Date, end: Date }[] } = {};
 
     for (const slot of bookingData) {
         if (!(slot.itemId in bookings)) {
@@ -113,30 +115,36 @@ const parseBookingData = (bookingData: ResponseData[]) => {
     return bookings;
 }
 
-const downloadRoomPage = async(roomId: string) => {
-
-    const response = await axios.get(ROOM_URL + roomId, {});
-
-    return response;
-
-}
-
 const getRoomData = async (roomId: string, buildingId: string) => {
 
-    const response = await downloadRoomPage(roomId);
+    const response = await axios.get(ROOM_URL + roomId, {});
     const $ = load(response.data);
 
     const $heading = $('h1#s-lc-public-header-title');
 
     // Remove whitespace and split the name, location and capacity into newlines
     const data = $heading.text().trim().split(/\s{2,}/g);
-    const capacity = Number(data[2].split(": ")[1]);
+    const [name, rawLocation, rawCapacity] = data;
+    const capacity = parseInt(rawCapacity.split(": ")[1]);
+
+    // We only care about rooms and pods
+    if (!name.match(/RM|POD/)) {
+        return null;
+    }
+
+    let roomNumber = name.split(' ')[2];
+    if (name.match(/POD/)) {
+        // Pods are just numbered 1-8 so prepend POD
+        roomNumber = 'POD' + roomNumber;
+    }
+
+    const libraryName = rawLocation.replace(/[()]/, '').split(':')[0];
 
     const roomData: Room = {
-        abbr: data[0],
-        name: data[0],
-        id: buildingId + "-" + roomId,
-        usage: "LIBRARY",
+        name: libraryName + ' ' + name,
+        abbr: name,
+        id: buildingId + "-" + roomNumber,
+        usage: "LIB",
         capacity: capacity,
         school: " "
     }
@@ -144,5 +152,18 @@ const getRoomData = async (roomId: string, buildingId: string) => {
     return roomData;
 }
 
-scrapeLibraryBookings(MAIN_LIBRARY_CODE, MAIN_LIBRARY_ID);
-scrapeLibraryBookings(LAW_LIBRARY_CODE, LAW_LIBRARY_ID);
+const runScrapeJob = async () => {
+    const allRooms: Room[] = [];
+    const allBookings: RoomBooking[] = [];
+    for (const library of LIBRARIES) {
+        const { rooms, bookings } = await scrapeLibraryBookings(library);
+        allRooms.push(...rooms);
+        allBookings.push(...bookings);
+    }
+
+    fs.writeFileSync('rooms.json', JSON.stringify(allRooms, null, 4));
+    fs.writeFileSync('bookings.json', JSON.stringify(allBookings, null, 4));
+}
+
+console.time('Scraping');
+runScrapeJob().then(() => console.timeEnd('Scraping'));
