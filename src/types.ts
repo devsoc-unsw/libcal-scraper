@@ -13,4 +13,5 @@ export type RoomBooking = {
     usage: string;
     capacity: number;
     school: string;
+    buildingId: string;
   }

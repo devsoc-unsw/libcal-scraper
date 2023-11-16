@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "ts-node src/libraryScraper.ts"
+    "build": "tsc --project ./",
+    "start": "node ./dist/libraryScraper.js",
+    "scrape": "ts-node src/libraryScraper.ts"
   },
   "keywords": [],
   "author": "",
@@ -16,6 +18,7 @@
     "cors": "^2.8.5",
     "date-fns": "^2.30.0",
     "date-fns-tz": "^2.0.0",
+    "dotenv": "^16.3.1",
     "express": "^4.18.1"
   },
   "devDependencies": {

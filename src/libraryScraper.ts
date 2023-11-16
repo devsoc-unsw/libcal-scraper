@@ -3,15 +3,16 @@ import { RoomBooking, Room } from "./types";
 import toSydneyTime from "./toSydneyTime";
 import axios from "axios";
 import * as fs from 'fs';
+import { HASURAGRES_URL } from './config';
 
 const ROOM_URL = "https://unswlibrary-bookings.libcal.com/space/";
 const BOOKINGS_URL = "https://unswlibrary-bookings.libcal.com/spaces/availability/grid";
 const LIBRARIES = [
     { name: 'Main Library', libcalCode: '6581', buildingId: 'K-F21' },
-    { name: 'Law Library', libcalCode: '6584', buildingId: 'K-E8' },
+    { name: 'Law Library', libcalCode: '6584', buildingId: 'K-F8' },
 ];
 
-const scrapeLibraryBookings = async (library: typeof LIBRARIES[number]) => {
+const scrapeLibrary = async (library: typeof LIBRARIES[number]) => {
     const response = await downloadBookingsPage(library.libcalCode);
     const bookingData = parseBookingData(response.data['slots']);
 
@@ -49,8 +50,6 @@ const scrapeLibraryBookings = async (library: typeof LIBRARIES[number]) => {
 
             allRoomBookings.push(currBooking);
         }
-
-        break;
     }
 
     return { rooms: allRoomData, bookings: allRoomBookings };
@@ -135,45 +134,82 @@ const getRoomData = async (roomId: string, buildingId: string) => {
     // Remove whitespace and split the name, location and capacity into newlines
     const data = $heading.text().trim().split(/\s{2,}/g);
     const [name, rawLocation, rawCapacity] = data;
-    const capacity = parseInt(rawCapacity.split(": ")[1]);
 
     // We only care about rooms and pods
     if (!name.match(/RM|POD/)) {
         return null;
     }
 
+    const libraryName = rawLocation.replace(/[()]/, '').split(':')[0];
+    const capacity = parseInt(rawCapacity.split(": ")[1]);
     let roomNumber = name.split(' ')[2];
     if (name.match(/POD/)) {
         // Pods are just numbered 1-8 so prepend POD
         roomNumber = 'POD' + roomNumber;
     }
 
-    const libraryName = rawLocation.replace(/[()]/, '').split(':')[0];
-
     const roomData: Room = {
         name: libraryName + ' ' + name,
         abbr: name,
         id: buildingId + "-" + roomNumber,
         usage: "LIB",
-        capacity: capacity,
-        school: " "
+        capacity,
+        school: " ",
+        buildingId: buildingId
     }
 
     return roomData;
 }
 
 const runScrapeJob = async () => {
+    console.time('Scraping');
     const allRooms: Room[] = [];
     const allBookings: RoomBooking[] = [];
     for (const library of LIBRARIES) {
-        const { rooms, bookings } = await scrapeLibraryBookings(library);
+        const { rooms, bookings } = await scrapeLibrary(library);
         allRooms.push(...rooms);
         allBookings.push(...bookings);
     }
+    console.timeEnd('Scraping');
 
-    fs.writeFileSync('rooms.json', JSON.stringify(allRooms, null, 4));
-    fs.writeFileSync('bookings.json', JSON.stringify(allBookings, null, 4));
+    // Send to Hasuragres
+    const requestConfig = {
+        headers: {
+            "Content-Type": "application/json"
+        }
+    }
+
+    await axios.post(
+      `${HASURAGRES_URL}/insert`,
+      {
+          metadata: {
+              table_name: "Rooms",
+              columns: ["abbr", "name", "id", "usage", "capacity", "school", "buildingId"],
+              sql_up: fs.readFileSync("./sql/rooms/up.sql", "utf8"),
+              sql_down: fs.readFileSync("./sql/rooms/down.sql", "utf8"),
+              sql_execute: "DELETE FROM Rooms WHERE \"usage\" = 'LIB';", // replace all lib rooms
+              write_mode: 'append'
+          },
+          payload: allRooms
+      },
+      requestConfig
+    );
+
+    await axios.post(
+      `${HASURAGRES_URL}/insert`,
+      {
+          metadata: {
+              table_name: "Bookings",
+              columns: ["bookingType", "name", "roomId", "start", "end"],
+              sql_up: fs.readFileSync("./sql/bookings/up.sql", "utf8"),
+              sql_down: fs.readFileSync("./sql/bookings/down.sql", "utf8"),
+              sql_execute: "DELETE FROM Bookings WHERE \"bookingType\" = 'LIB';", // replace all lib bookings
+              write_mode: 'append'
+          },
+          payload: allBookings
+      },
+      requestConfig
+    );
 }
 
-console.time('Scraping');
-runScrapeJob().then(() => console.timeEnd('Scraping'));
+runScrapeJob();
