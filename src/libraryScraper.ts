@@ -197,6 +197,7 @@ const runScrapeJob = async () => {
       requestConfig
     );
 
+    // libcal shows all bookings that start during or after the current 30-min period
     const baseTime = new Date();
     baseTime.setMinutes(baseTime.getMinutes() < 30 ? 0 : 30, 0, 0);
     await axios.post(

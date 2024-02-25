@@ -4,7 +4,7 @@
 
 -- Remove all bookings after the current time
 DELETE FROM Bookings
-WHERE "bookingType" = 'LIB' AND "start" > '{0}';
+WHERE "bookingType" = 'LIB' AND "start" >= '{0}';
 
 -- Truncate all bookings that go past the current time
 UPDATE Bookings
