@@ -208,7 +208,7 @@ const runScrapeJob = async () => {
               columns: ["bookingType", "name", "roomId", "start", "end"],
               sql_up: fs.readFileSync("./sql/bookings/up.sql", "utf8"),
               sql_down: fs.readFileSync("./sql/bookings/down.sql", "utf8"),
-              sql_before: fs.readFileSync("./sql/bookings/before.sql", "utf8").replace(/\{0}/g, baseTime.toISOString()),
+              sql_before: fs.readFileSync("./sql/bookings/before.sql", "utf8"),
               sql_after: fs.readFileSync("./sql/bookings/after.sql", "utf8"),
               write_mode: 'append'
           },

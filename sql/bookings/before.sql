@@ -1,12 +1,8 @@
--- The '{0}' are for substitution of the current time from the code
--- The zero is there in case we need future substitutions, possibly
--- using some kind of format function
-
--- Remove all bookings after the current time
+-- Remove all bookings starting in or after the current timeslot
 DELETE FROM Bookings
-WHERE "bookingType" = 'LIB' AND "start" >= '{0}';
+WHERE "bookingType" = 'LIB' AND "start" >= date_bin('30 minutes', now(), TIMESTAMPTZ '2001-01-01');
 
--- Truncate all bookings that go past the current time
+-- Truncate all bookings that go through the current timeslot
 UPDATE Bookings
-SET "end" = '{0}'
-WHERE "bookingType" = 'LIB' AND "end" > '{0}';
+SET "end" = date_bin('30 minutes', now(), TIMESTAMPTZ '2001-01-01')
+WHERE "bookingType" = 'LIB' AND "end" > date_bin('30 minutes', now(), TIMESTAMPTZ '2001-01-01');
