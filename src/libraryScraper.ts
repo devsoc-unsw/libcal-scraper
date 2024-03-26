@@ -3,7 +3,7 @@ import { RoomBooking, Room } from "./types";
 import toSydneyTime from "./toSydneyTime";
 import axios from "axios";
 import * as fs from 'fs';
-import { HASURAGRES_URL } from './config';
+import { DRYRUN, HASURAGRES_API_KEY, HASURAGRES_URL } from './config';
 
 const ROOM_URL = "https://unswlibrary-bookings.libcal.com/space/";
 const BOOKINGS_URL = "https://unswlibrary-bookings.libcal.com/spaces/availability/grid";
@@ -175,7 +175,8 @@ const runScrapeJob = async () => {
     // Send to Hasuragres
     const requestConfig = {
         headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "X-API-Key": HASURAGRES_API_KEY,
         }
     }
 
@@ -190,7 +191,8 @@ const runScrapeJob = async () => {
               // overwrite all outdated lib rooms
               sql_before: "DELETE FROM Rooms WHERE \"usage\" = 'LIB' " +
                           `AND "id" NOT IN (${allRooms.map(room => `'${room.id}'`).join(",")});`,
-              write_mode: 'append'
+              write_mode: 'append',
+              dryrun: DRYRUN,
           },
           payload: allRooms
       },
@@ -210,7 +212,8 @@ const runScrapeJob = async () => {
               sql_down: fs.readFileSync("./sql/bookings/down.sql", "utf8"),
               sql_before: fs.readFileSync("./sql/bookings/before.sql", "utf8"),
               sql_after: fs.readFileSync("./sql/bookings/after.sql", "utf8"),
-              write_mode: 'append'
+              write_mode: 'append',
+              dryrun: DRYRUN,
           },
           payload: allBookings
       },
