@@ -3,7 +3,7 @@ import { RoomBooking, Room } from "./types";
 import toSydneyTime from "./toSydneyTime";
 import axios from "axios";
 import * as fs from 'fs';
-import { HASURAGRES_URL } from './config';
+import { DRYRUN, HASURAGRES_API_KEY, HASURAGRES_URL } from './config';
 
 const ROOM_URL = "https://unswlibrary-bookings.libcal.com/space/";
 const BOOKINGS_URL = "https://unswlibrary-bookings.libcal.com/spaces/availability/grid";
@@ -175,7 +175,8 @@ const runScrapeJob = async () => {
     // Send to Hasuragres
     const requestConfig = {
         headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "X-API-Key": HASURAGRES_API_KEY,
         }
     }
 
@@ -187,14 +188,20 @@ const runScrapeJob = async () => {
               columns: ["abbr", "name", "id", "usage", "capacity", "school", "buildingId"],
               sql_up: fs.readFileSync("./sql/rooms/up.sql", "utf8"),
               sql_down: fs.readFileSync("./sql/rooms/down.sql", "utf8"),
-              sql_execute: "DELETE FROM Rooms WHERE \"usage\" = 'LIB';", // replace all lib rooms
-              write_mode: 'append'
+              // overwrite all outdated lib rooms
+              sql_before: "DELETE FROM Rooms WHERE \"usage\" = 'LIB' " +
+                          `AND "id" NOT IN (${allRooms.map(room => `'${room.id}'`).join(",")});`,
+              write_mode: 'append',
+              dryrun: DRYRUN,
           },
           payload: allRooms
       },
       requestConfig
     );
 
+    // libcal shows all bookings that start during or after the current 30-min period
+    const baseTime = new Date();
+    baseTime.setMinutes(baseTime.getMinutes() < 30 ? 0 : 30, 0, 0);
     await axios.post(
       `${HASURAGRES_URL}/insert`,
       {
@@ -203,8 +210,10 @@ const runScrapeJob = async () => {
               columns: ["bookingType", "name", "roomId", "start", "end"],
               sql_up: fs.readFileSync("./sql/bookings/up.sql", "utf8"),
               sql_down: fs.readFileSync("./sql/bookings/down.sql", "utf8"),
-              sql_execute: "DELETE FROM Bookings WHERE \"bookingType\" = 'LIB';", // replace all lib bookings
-              write_mode: 'append'
+              sql_before: fs.readFileSync("./sql/bookings/before.sql", "utf8"),
+              sql_after: fs.readFileSync("./sql/bookings/after.sql", "utf8"),
+              write_mode: 'append',
+              dryrun: DRYRUN,
           },
           payload: allBookings
       },

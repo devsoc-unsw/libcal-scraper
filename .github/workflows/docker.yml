@@ -1,10 +1,28 @@
 name: Docker
 on:
   push:
+    branches:
+      - "main"
 
 jobs:
+  test:
+    name: "Test"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "16"
+      - name: Install dependencies
+        run: npm install
+      - name: Run scraper
+        run: npm run scrape
+        env:
+          HASURAGRES_URL: https://graphql.csesoc.app
+          HASURAGRES_API_KEY: ${{ secrets.HASURAGRES_API_KEY }}
   build:
     name: "Build"
+    needs: [test]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,8 +47,37 @@ jobs:
           platforms: linux/amd64
           file: Dockerfile
           tags: |
-            ghcr.io/csesoc/libcal-scraper:${{ github.sha }}
-            ghcr.io/csesoc/libcal-scraper:latest
+            ghcr.io/devsoc-unsw/libcal-scraper:${{ github.sha }}
+            ghcr.io/devsoc-unsw/libcal-scraper:latest
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+  deploy:
+    name: Deploy (CD)
+    runs-on: ubuntu-latest
+    needs: [ build ]
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+        with:
+          repository: csesoc/deployment
+          ref: migration
+          token: ${{ secrets.GH_TOKEN }}
+      - name: Install yq
+        uses: mikefarah/yq@v4.40.5
+      - name: Update deployment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          git config user.name "CSESoc CD"
+          git config user.email "technical@csesoc.org.au"
+
+          git checkout -b update/libcal-scraper/${{ github.sha }}
+          yq -i '.spec.jobTemplate.spec.template.spec.containers[0].image = "ghcr.io/devsoc-unsw/libcal-scraper:${{ github.sha }}"' projects/libcal-scraper/libcal-scraper.yml
+          
+          git add . 
+          git commit -m "feat(libcal-scraper): update image" 
+          git push -u origin update/libcal-scraper/${{ github.sha }}
+          gh pr create -B migration --title "feat(libcal-scraper): update image" --body "Updates the image for the libcal-scraper deployment to commit devsoc-unsw/libcal-scraper@${{ github.sha }}." > URL
+          gh pr merge $(cat URL) --squash -d
